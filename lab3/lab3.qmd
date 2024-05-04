@@ -1,0 +1,190 @@
+---
+title: "lab3"
+author: "Полянская Полина Алексеевна"
+format:   
+  md:
+    output-file: README.md
+editor_options: 
+  chunk_output_type: inline
+---
+
+Анализ данных сетевого трафика при помощи библиотеки
+Arrow
+
+## Цель
+
+1. Изучить возможности технологии Apache Arrow для обработки и анализа больших данных \n
+2. Получить навыки применения Arrow совместно с языком программирования R \n
+3. Получить навыки анализа метаинфомации о сетевом трафике \n
+4. Получить навыки применения облачных технологий хранения, подготовки и анализа данных: Yandex Object Storage, Rstudio Server. \n
+
+## Исходные данные
+
+1.  Ноутбук с ОС Windows 10
+2.  RStudio
+3.  Yandex Cloud
+4.  Библиотека Arrow
+5.  RStudio Server
+
+## Задание 
+
+Используя язык программирования R, библиотеку arrow
+и облачную IDE Rstudio Server, развернутую в Yandex
+Cloud, выполнить задания и составить отчет.
+
+## Задачи
+
+1. Найдите утечку данных из Вашей сети \n
+2. Надите утечку данных 2  \n
+3. Надите утечку данных 3 \n
+
+## Ход работы
+
+### Шаг 0. Настройка окружения. 
+
+Смена прав на доступ к файлу ключа.
+```{}
+chmod =600 ~/key_th_pr3/rstudio.key
+```
+
+Подключение через SSH.
+```{}
+ssh -i ~/key_th_pr3/rstudio.key -L 8787:127.0.0.1:8787 userNN@62.84.123.211
+```
+```{}
+NN - номер юзера (мой - 23)
+```
+
+Смена пароля.
+```{}
+passwd
+```
+
+Также нужно подключиться к своему гит-репозиторию.
+
+### Шаг 1. Импорт данных
+
+```{r}
+library(arrow, warn.conflicts = FALSE)
+```
+
+```{r}
+library(dplyr)
+```
+
+```{r}
+library(tidyverse, warn.conflicts = FALSE)
+```
+
+```{r}
+dir.create("data", showWarnings = FALSE)
+
+curl::multi_download(
+  "https://storage.yandexcloud.net/arrow-datasets/tm_data.pqt",
+  "data/testdata",
+  resume = TRUE
+)
+```
+
+
+### Шаг 2. Обработка данных
+
+#### 1. Найти утечку данных
+Важнейшие документы с результатами нашей исследовательской деятельности в
+области создания вакцин скачиваются в виде больших заархивированных дампов.
+Один из хостов в нашей сети используется для пересылки этой информации – он
+пересылает гораздо больше информации на внешние ресурсы в Интернете, чем
+остальные компьютеры нашей сети. Определите его IP-адрес.
+
+```{r}
+dt <- open_dataset(
+  sources = "data/testdata",
+  schema = schema(timestamp=int64(), src=utf8(), dst=utf8(), port=uint32(), bytes=uint32())
+)
+
+dt %>% 
+  glimpse()
+```
+
+```{r}
+dl_1 <- dt %>%
+  filter(str_detect(src, "^12.") | str_detect(src, "^13.") | str_detect(src, "^14."))  %>%
+  filter(!str_detect(dst, "^12.") | !str_detect(dst, "^13.") | !str_detect(dst, "^14."))  %>%
+  group_by(src) %>% summarise("sum" = sum(bytes)) %>%  
+  filter(sum > 6000000000) %>% select(src,sum)
+
+dl_1 |> collect()
+```
+
+Ответ: 13.37.84.125
+
+#### 2. Найти утечку данных
+Другой атакующий установил автоматическую задачу в системном планировщике
+cron для экспорта содержимого внутренней wiki системы. Эта система генерирует
+большое количество трафика в нерабочие часы, больше чем остальные хосты.
+Определите IP этой системы. Известно, что ее IP адрес отличается от нарушителя из
+предыдущей задачи.
+
+```{r}
+dl_2 <- dt %>%
+      select(timestamp, src, dst, bytes) %>%
+      mutate(trafic = (str_detect(src, "^((12|13|14)\\.)") & !str_detect(dst, "^((12|13|14)\\.)")),time = hour(as_datetime(timestamp/1000))) %>%
+      filter(trafic == TRUE, time >= 0 & time <= 24) %>% group_by(time) %>%
+      summarise(trafictime = n()) %>% arrange(desc(trafictime))
+
+dl_2 |> collect()
+```
+
+
+```{r}
+dl_2_2 <- dt %>% mutate(time = hour(as_datetime(timestamp/1000))) %>% 
+  filter(!str_detect(src, "^13.37.84.125")) %>% 
+  filter(str_detect(src, "^12.") | str_detect(src, "^13.") | str_detect(src, "^14."))  %>%
+  filter(!str_detect(dst, "^12.") | !str_detect(dst, "^13.") | !str_detect(dst, "^14."))  %>%
+  filter(time >= 1 & time <= 15) %>% 
+  group_by(src) %>% summarise("sum" = sum(bytes)) %>%
+  filter(sum > 290000000) %>% select(src,sum) 
+
+dl_2_2 |> collect()
+```
+
+Ответ: 12.55.77.96
+
+#### 3. Найти утечку данных
+Еще один нарушитель собирает содержимое электронной почты и отправляет в
+Интернет используя порт, который обычно используется для другого типа трафика.
+Атакующий пересылает большое количество информации используя этот порт,
+которое нехарактерно для других хостов, использующих этот номер порта.
+Определите IP этой системы. Известно, что ее IP адрес отличается от нарушителей
+из предыдущих задач.
+
+```{r}
+dl_3 <- dt %>% filter(!str_detect(src, "^13.37.84.125")) %>% 
+  filter(!str_detect(src, "^12.55.77.96")) %>% 
+  filter(str_detect(src, "^12.") | str_detect(src, "^13.") | str_detect(src, "^14."))  %>%
+  filter(!str_detect(dst, "^12.") | !str_detect(dst, "^13.") | !str_detect(dst, "^14."))  %>% select(src, bytes, port) 
+```
+
+```{r}
+dl_3_1 <- dl_3 %>%  group_by(port) %>% summarise("mean"=mean(bytes), "max"=max(bytes), "sum" = sum(bytes)) %>% 
+  mutate("Raz"= max-mean)  %>% filter(Raz!=0, Raz>170000)
+
+dl_3_1 |> collect()
+```
+
+```{r}
+dl3_2 <- dl_3  %>% filter(port == 37) %>% group_by(src) %>% 
+  summarise("mean" = mean(bytes)) %>% filter(mean > 37543) %>% select(src)
+
+dl3_2 |> collect()
+```
+
+Ответ: 13.46.35.35
+
+## Оценка результатов
+
+С использованием RStudio Server, Apache Arrow и языка программирования R были выполнены задания.
+
+## Вывод
+
+Apache Arrow - хорошее средство для решения задач с большими данными.
