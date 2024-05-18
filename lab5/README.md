@@ -187,6 +187,50 @@ leak %>% head(1)
 чем остальные хосты. Определите IP этой системы. Известно, что ее IP
 адрес отличается от нарушителя из предыдущей задачи.
 
+``` r
+library(lubridate)
+df_normaltime_by_traffic_size <- df %>% select(timestamp, src, dst, bytes) %>% filter(!str_detect(dst, '1[2-4].*')) %>% mutate(timestamp = hour(as_datetime(timestamp/1000))) %>% group_by(timestamp) %>% summarize(traffic_size = sum(bytes)) %>% arrange(desc(traffic_size))
+df_normaltime_by_traffic_size %>% collect() %>% print(n = Inf)
+```
+
+    # A tibble: 24 × 2
+       timestamp traffic_size
+           <int>        <dbl>
+     1        18  60193966072
+     2        23  60192411947
+     3        21  60168340116
+     4        16  60098320900
+     5        20  60080805313
+     6        17  60038805616
+     7        22  60019583499
+     8        19  59993406253
+     9         7   2407989038
+    10        12   2273682799
+    11         3   2272781208
+    12         6   2272628627
+    13         0   2272231719
+    14        13   2269391474
+    15         8   2256895552
+    16        15   2256892969
+    17         9   2255747421
+    18         5   2254830735
+    19        14   2253404224
+    20         2   2250935353
+    21         4   2247503973
+    22        10   2246424468
+    23        11   2245261098
+    24         1   2241313453
+
+``` r
+df_traffic_no_worktime_anomaly <- df %>% select(timestamp, src, dst, bytes) %>% mutate(timestamp = hour(as_datetime(timestamp/1000))) %>% filter(!str_detect(dst, '1[2-4].*') & timestamp >= 0 & timestamp <= 15)  %>% group_by(src) %>% summarise(bytes_amount = sum(bytes)) %>% arrange(desc(bytes_amount)) %>% collect()
+df_traffic_no_worktime_anomaly %>% filter(src != '13.37.84.125') %>% head(1)
+```
+
+    # A tibble: 1 × 2
+      src         bytes_amount
+      <chr>              <int>
+    1 12.55.77.96    194447613
+
 #### 3. Найдите утечку данных 3
 
 Еще один нарушитель собирает содержимое электронной почты и отправляет в
@@ -196,6 +240,30 @@ leak %>% head(1)
 номер порта. Определите IP этой системы. Известно, что ее IP адрес
 отличается от нарушителей из предыдущих задач.
 
+``` r
+average_ports_traffic <- df |> select(timestamp, src, dst, port, bytes) %>% filter(!str_detect(dst, '1[2-4].')) %>% group_by(src, port) %>% summarise(bytes_ip_port = sum(bytes)) %>% group_by(port) %>% summarise(average_port_traffic = mean(bytes_ip_port)) %>% arrange(desc(average_port_traffic)) |> collect()
+```
+
+    `summarise()` has grouped output by 'src'. You can override using the `.groups`
+    argument.
+
+``` r
+max_ips_ports_traffic <- df |> select(timestamp, src, dst, port, bytes) %>% filter(!str_detect(dst, '1[2-4].')) %>% group_by(src, port) %>% summarise(bytes_ip_port = sum(bytes)) %>% collect() %>% group_by(port) %>% top_n(1, bytes_ip_port) %>% arrange(desc(bytes_ip_port))
+```
+
+    `summarise()` has grouped output by 'src'. You can override using the `.groups`
+    argument.
+
+``` r
+merged_df <- merge(max_ips_ports_traffic, average_ports_traffic, by = "port")
+
+anomaly_ip_port_traffic <- merged_df %>% mutate(average_anomaly = bytes_ip_port/average_port_traffic) %>% arrange(desc(average_anomaly)) %>% head(1)
+anomaly_ip_port_traffic
+```
+
+      port         src bytes_ip_port average_port_traffic average_anomaly
+    1  124 12.30.96.87        281993             15641.06        18.02902
+
 #### 4. Обнаружение канала управления
 
 Зачастую в корпоротивных сетях находятся ранее зараженные системы,
@@ -203,6 +271,14 @@ leak %>% head(1)
 небольшое количество трафика для связи с панелью управления бот-сети, но
 с одинаковыми параметрами – в данном случае с одинаковым номером порта.
 Какой номер порта используется бот-панелью для управления ботами?
+
+``` r
+df2 <- dbGetQuery(con, "SELECT min(bytes),max(bytes),max(bytes) - min(bytes), avg(bytes), port,count(port) FROM data group by port having avg(bytes) - min(bytes) < 10 and min(bytes) != max(bytes)")
+df2 %>% select(port)
+```
+
+      port
+    1  124
 
 #### 5. Обнаружение P2P трафика
 
@@ -214,12 +290,36 @@ leak %>% head(1)
 уникальный порт используется этой бот сетью для внутреннего общения
 между собой?
 
+``` r
+df2 <- dbGetQuery(con, "SELECT min(bytes),max(bytes),max(bytes) - min(bytes) as anomaly, avg(bytes), port,count(port) FROM data where (src LIKE '12.%' or src LIKE '13.%' or src LIKE '14.%') and (dst LIKE '12.%' or dst LIKE '13.%' or dst LIKE '14.%') group by port order by anomaly desc limit 1")
+df2 %>% select(port)
+```
+
+      port
+    1  115
+
 #### 6. Чемпион малвари
 
 Нашу сеть только что внесли в списки спам-ферм. Один из хостов сети
 получает множество команд от панели C&C, ретранслируя их внутри сети. В
 обычных условиях причин для такого активного взаимодействия внутри сети
 у данного хоста нет. Определите IP такого хоста.
+
+``` r
+task6 <- dbGetQuery(con, "
+  SELECT src, COUNT(src) as sume
+  FROM data
+  WHERE (src LIKE '12.%' OR src LIKE '13.%' OR src LIKE '14.%')
+      AND (dst  LIKE '12.%' or dst  LIKE '13.%' or dst  LIKE '14.%')
+    GROUP BY src
+    ORDER BY sume DESC
+    LIMIT 1
+")
+task6
+```
+
+              src  sume
+    1 13.42.70.40 65109
 
 #### 7. Скрытая бот-сеть
 
@@ -228,9 +328,28 @@ leak %>% head(1)
 бот-сети не входят в уже обнаруженную нами бот-сеть. Какой порт
 используется продвинутой бот-сетью для коммуникации?
 
+``` r
+df2 <- dbGetQuery(con, "SELECT port, timestamp FROM data where timestamp == (select max(timestamp) from data)")
+df2
+```
+
+      port    timestamp
+    1   83 1.578784e+12
+
 #### 8. Внутренний сканнер
 
 Одна из наших машин сканирует внутреннюю сеть. Что это за система?
+
+    task8 <- dbGetQuery(conn, "
+      SELECT src, AVG(timestamp) as time, count(DISTINCT dst) as coun
+      FROM data
+      WHERE (src LIKE '12.%' OR src LIKE '13.%' OR src LIKE '14.%')
+          AND (dst  LIKE '12.%' or dst  LIKE '13.%' or dst  LIKE '14.%')
+        GROUP BY src
+        ORDER BY time 
+        LIMIT 1
+    ")
+    task8
 
 ## Оценка результатов
 

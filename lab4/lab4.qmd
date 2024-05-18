@@ -136,6 +136,11 @@ df %>% select(port)
 Какой уникальный порт используется этой бот сетью для внутреннего общения между собой?
 
 ```{}
+df2 <- dbGetQuery(con, "SELECT min(bytes),max(bytes),max(bytes) - min(bytes) as anomaly, avg(bytes), port,count(port) FROM data where (src LIKE '12.%' or src LIKE '13.%' or src LIKE '14.%') and (dst LIKE '12.%' or dst LIKE '13.%' or dst LIKE '14.%') group by port order by anomaly desc limit 1")
+df2 %>% select(port)
+```
+
+```{}
 Ответ:
 115
 ```
@@ -143,6 +148,13 @@ df %>% select(port)
 #### 6. Чемпион малвари
 Нашу сеть только что внесли в списки спам-ферм. Один из хостов сети получает множество команд от панели C&C, ретранслируя их внутри сети. В обычных условиях причин для такого активного взаимодействия внутри сети у данного хоста нет.
 Определите IP такого хоста.
+
+```{}
+z6 <- df %>%
+  filter(str_detect(src, "^12.") | str_detect(src, "^13.") | str_detect(src, "^14."))  %>%
+  filter(str_detect(dst, "^12.") | str_detect(dst, "^13.") | str_detect(dst, "^14."))  %>% group_by(src) %>% summarise(count = n()) %>% arrange(desc(count)) %>% slice(1)
+z6 |> collect()
+```
 
 ```{}
 Ответ:
